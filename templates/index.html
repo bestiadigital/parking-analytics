@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parking Analytics</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="8" fill="#1d4ed8"/>
+        <path d="M9 7h6a5 5 0 0 1 0 10H9V7z" fill="white"/>
+        <rect x="9" y="17" width="3" height="4" rx="1" fill="white"/>
+      </svg>
+      <span class="logo-text">Parking Analytics</span>
+    </div>
+    <div class="header-right">
+      <span id="headerBranch" class="header-branch">—</span>
+    </div>
+  </div>
+</header>
+
+<!-- LAYOUT -->
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- Branch -->
+    <div class="sb-section">
+      <label class="sb-label">Sucursal</label>
+      <select id="branchSelect" onchange="onBranchChange()">
+        {% for key, b in branches.items() %}
+        <option value="{{ key }}">{{ b.label }}</option>
+        {% endfor %}
+      </select>
+      <span id="branchAddress" class="address-text"></span>
+    </div>
+
+    <!-- Upload -->
+    <div class="sb-section">
+      <label class="sb-label">Archivo Excel</label>
+      <div id="dropzone" class="dropzone">
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" class="drop-icon">
+          <path d="M18 4v18M11 11l7-7 7 7" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M6 26v2a2 2 0 0 0 2 2h20a2 2 0 0 0 2-2v-2" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        <p class="drop-text">Arrastrá el archivo aquí</p>
+        <span class="drop-or">o</span>
+        <button class="btn-upload" onclick="document.getElementById('fileInput').click()">Seleccionar archivo</button>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+      </div>
+      <div id="fileInfo" class="file-info hidden"></div>
+    </div>
+
+    <!-- Time ranges -->
+    <div class="sb-section">
+      <div class="sb-section-head">
+        <label class="sb-label">Turnos</label>
+        <div class="sb-actions">
+          <button class="btn-tiny" onclick="addRangeRow()">+ Agregar</button>
+          <button class="btn-tiny btn-ghost-tiny" onclick="resetRanges()">Resetear</button>
+        </div>
+      </div>
+      <div id="rangesContainer"></div>
+    </div>
+
+    <!-- Duration ranges -->
+    <div class="sb-section">
+      <div class="sb-section-head">
+        <label class="sb-label">Duración</label>
+        <div class="sb-actions">
+          <button class="btn-tiny" onclick="addDurRow()">+ Agregar</button>
+          <button class="btn-tiny btn-ghost-tiny" onclick="resetDurRanges()">Resetear</button>
+        </div>
+      </div>
+      <div id="durContainer"></div>
+    </div>
+
+    <!-- Actions -->
+    <div class="sb-section sb-actions-main">
+      <button id="analyzeBtn" class="btn-primary" onclick="doAnalyze()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 14l4-4 3 3 5-8" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Analizar
+      </button>
+      <button id="compareBtn" class="btn-secondary" onclick="addToComparison()" disabled>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="6" height="9" rx="1" stroke="#60a5fa" stroke-width="1.6"/><rect x="9" y="2" width="6" height="9" rx="1" stroke="#60a5fa" stroke-width="1.6"/></svg>
+        Agregar comparación
+      </button>
+      <div class="export-row">
+        <button id="exportExcelBtn" class="btn-export" onclick="exportExcel()" disabled>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Excel
+        </button>
+        <button id="exportPdfBtn" class="btn-export" onclick="exportPdf()" disabled>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          PDF
+        </button>
+      </div>
+    </div>
+
+    <!-- NO OPERATIVO criteria -->
+    <div class="sb-section sb-criteria">
+      <label class="sb-label">Exclusión "No Operativo"</label>
+      <ul>
+        <li>Cancelado = <code>Cancelado</code></li>
+        <li>Importe = 0 y sin cancelación</li>
+      </ul>
+    </div>
+
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="content" id="mainContent">
+
+    <!-- Empty state -->
+    <div id="emptyState" class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+        <rect width="64" height="64" rx="16" fill="#0f1e36"/>
+        <path d="M32 16v24M22 26l10-10 10 10" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M18 50v2a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2v-2" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+      <h2>Listo para analizar</h2>
+      <p>Seleccioná una sucursal, subí el archivo Excel y hacé clic en <strong>Analizar</strong>.</p>
+    </div>
+
+    <!-- Preview section -->
+    <section id="previewSection" class="hidden section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Vista previa del archivo</h2>
+          <p id="previewMeta" class="section-sub"></p>
+        </div>
+        <button class="btn-ghost-sm" onclick="togglePreview()">
+          <span id="previewToggleLabel">Ocultar</span>
+        </button>
+      </div>
+      <div id="previewTableWrap" class="table-wrap">
+        <table id="previewTable" class="data-table"></table>
+      </div>
+    </section>
+
+    <!-- Results section -->
+    <section id="resultsSection" class="hidden">
+
+      <!-- Branch + timestamp -->
+      <div class="results-header">
+        <div>
+          <h2 id="resultsBranchLabel" class="results-title"></h2>
+          <span id="resultsTimestamp" class="results-ts"></span>
+        </div>
+        <div class="results-header-right">
+          <div id="filterBadge" class="filter-badge"></div>
+        </div>
+      </div>
+
+      <!-- KPIs -->
+      <div id="kpisRow" class="kpis-row"></div>
+
+      <!-- Charts grid -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <h3 class="chart-title">Tickets por Turno</h3>
+          <div class="chart-container"><canvas id="chartTurnos"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3 class="chart-title">Ingresos por Turno</h3>
+          <div class="chart-container"><canvas id="chartIngresos"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3 class="chart-title">Distribución por Duración</h3>
+          <div class="chart-container chart-container-sm"><canvas id="chartDuracion"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <h3 class="chart-title">Categorías de Vehículos</h3>
+          <div class="chart-container chart-container-sm"><canvas id="chartCategorias"></canvas></div>
+        </div>
+        <div class="chart-card chart-full">
+          <h3 class="chart-title">Evolución Diaria de Tickets</h3>
+          <div class="chart-container chart-container-lg"><canvas id="chartDiario"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Shift table -->
+      <div class="section-card">
+        <h3 class="section-title">Detalle por Turno</h3>
+        <div class="table-wrap">
+          <table id="shiftTable" class="data-table"></table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Comparison section -->
+    <section id="comparisonSection" class="hidden section-card">
+      <div class="section-header">
+        <h2 class="section-title">Comparación de Análisis</h2>
+        <button class="btn-ghost-sm btn-danger" onclick="clearComparison()">Limpiar</button>
+      </div>
+      <div id="comparisonContent"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="spinner"></div>
+  <span id="loadingText">Analizando...</span>
+</div>
+
+<script>
+  // Inject Python data into JS
+  const BRANCHES = {{ branches | tojson }};
+  const DEFAULT_DUR_RANGES = [
+    { name: '0 – 60 min',  from_min: 0,   to_min: 60  },
+    { name: '1 – 2 hs',    from_min: 61,  to_min: 120 },
+    { name: '2 – 3 hs',    from_min: 121, to_min: 180 },
+    { name: '+3 hs',        from_min: 181, to_min: null },
+  ];
+</script>
+<script src="/static/js/main.js"></script>
+</body>
+</html>
