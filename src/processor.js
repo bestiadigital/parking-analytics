@@ -33,6 +33,23 @@ function findCol(row, candidates) {
   return null;
 }
 
+// Detecta si el archivo es formato Monroe (columnas de hora y minuto separadas)
+function detectFormat(data) {
+  if (!data || data.length === 0) return 'STANDARD';
+  const keys = Object.keys(data[0]).map(k => norm(k));
+  return (keys.includes('ingreso hora') || keys.includes('ingreso minuto')) ? 'MONROE' : 'STANDARD';
+}
+
+// Combina fecha + hora + minuto del formato Monroe en un Date
+function buildMonroeDate(fecha, hora, minuto) {
+  if (!fecha) return null;
+  const parts = String(fecha).match(/(\d+)\/(\d+)\/(\d+)/);
+  if (!parts) return null;
+  const h = String(hora || '0').padStart(2, '0');
+  const m = String(minuto || '0').padStart(2, '0');
+  return new Date(`${parts[3]}-${parts[2]}-${parts[1]}T${h}:${m}:00`);
+}
+
 export function processAnalytics(data, shifts, durRanges) {
   let operativeCount = 0;
   let excludedCount = 0;
@@ -51,27 +68,32 @@ export function processAnalytics(data, shifts, durRanges) {
   
   const categoryStats = {};
   const dailyData = {};
+  const obsStats = {};
+  const format_type = detectFormat(data);
 
   data.forEach((row, i) => {
-    // 1. Encontrar valores (flexibilidad con nombres de columnas)
-    const importeRaw = findCol(row, ['Importe', 'Total', 'Monto', 'Precio', 'Valor', 'importe', 'total']);
+    // 1. Importe
+    const importeRaw = format_type === 'MONROE'
+      ? findCol(row, ['Importe Pagado', 'importe pagado', 'Importe', 'importe'])
+      : findCol(row, ['Importe', 'Total', 'Monto', 'Precio', 'Valor', 'importe', 'total']);
     const importeStr = importeRaw != null ? String(importeRaw) : '0';
-    // Soporta formatos: "$10,625.00" (US) y "$10.625,00" (AR)
     let importe = 0;
     const cleanStr = importeStr.replace(/[^0-9.,]/g, '');
     if (cleanStr.match(/,\d{2}$/)) {
-      // Formato AR: punto=miles, coma=decimal → "10.625,00"
       importe = parseFloat(cleanStr.replace(/\./g, '').replace(',', '.')) || 0;
     } else {
-      // Formato US: coma=miles, punto=decimal → "10,625.00"
       importe = parseFloat(cleanStr.replace(/,/g, '')) || 0;
     }
 
-    // Detección de cancelación: columna "Cancelado" vale "Cancelado"; "-" = no cancelado
+    // 2. Cancelación
     const canceladoVal = findCol(row, ['Cancelado', 'cancelado', 'Estado', 'estado', 'Status']);
-    const isCancelado = canceladoVal != null && String(canceladoVal).trim().toLowerCase() === 'cancelado';
+    const canceladoStr = String(canceladoVal || '').trim().toLowerCase();
+    // Monroe: "falso" = válido, "verdadero" = cancelado
+    // Estándar: "cancelado" = cancelado, "-" = válido
+    const isCancelado = format_type === 'MONROE'
+      ? (canceladoStr === 'verdadero' || canceladoStr === 'true')
+      : (canceladoStr === 'cancelado');
 
-    // Filtro principal: Ignorar cancelados o tickets sin importe
     if (isCancelado || importe === 0) {
       excludedCount++;
       return;
@@ -80,25 +102,43 @@ export function processAnalytics(data, shifts, durRanges) {
     operativeCount++;
     totalRevenue += importe;
 
-    // Calcular duración y turno de ingreso
-    const ingreso = findCol(row, ['Desde', 'desde', 'Fecha Ingreso', 'Ingreso', 'Entrada', 'fecha ingreso', 'ingreso', 'entrada', 'FechaIngreso']);
-    const egreso = findCol(row, ['Hasta', 'hasta', 'Fecha Egreso', 'Egreso', 'Salida', 'fecha egreso', 'egreso', 'salida', 'FechaEgreso']);
-
-    let ingresoDate = parseDateString(ingreso);
-    let egresoDate = parseDateString(egreso);
-    let durationMins = 0;
-
-    if (ingreso && egreso) {
-       if (ingresoDate && egresoDate) {
-           durationMins = Math.max(0, (egresoDate.getTime() - ingresoDate.getTime()) / 60000);
-       }
+    // 3. Fechas de ingreso y egreso
+    let ingresoDate, egresoDate;
+    if (format_type === 'MONROE') {
+      ingresoDate = buildMonroeDate(
+        findCol(row, ['Ingreso Fecha', 'ingreso fecha']),
+        findCol(row, ['Ingreso Hora', 'ingreso hora']),
+        findCol(row, ['Ingreso Minuto', 'ingreso minuto'])
+      );
+      egresoDate = buildMonroeDate(
+        findCol(row, ['Egreso Fecha', 'egreso fecha']),
+        findCol(row, ['Egreso Hora', 'egreso hora']),
+        findCol(row, ['Egreso Minuto', 'egreso minuto'])
+      );
     } else {
-       // Alternativa: buscar columna de duración si existe
+      const ingreso = findCol(row, ['Desde', 'desde', 'Fecha Ingreso', 'Ingreso', 'Entrada', 'fecha ingreso', 'ingreso', 'entrada']);
+      const egreso = findCol(row, ['Hasta', 'hasta', 'Fecha Egreso', 'Egreso', 'Salida', 'fecha egreso', 'egreso', 'salida']);
+      ingresoDate = parseDateString(ingreso);
+      egresoDate = parseDateString(egreso);
+    }
+
+    let durationMins = 0;
+    if (ingresoDate && egresoDate) {
+      durationMins = Math.max(0, (egresoDate.getTime() - ingresoDate.getTime()) / 60000);
+    } else if (format_type !== 'MONROE') {
        const durStr = findCol(row, ['Duración', 'Duracion', 'Tiempo', 'duración', 'duracion', 'tiempo']) || '';
        const match = durStr.match(/(\d+)\s*(hs|h|min|m)/i);
        if (match) {
            durationMins = match[2].toLowerCase().startsWith('h') ? parseInt(match[1])*60 : parseInt(match[1]);
        }
+    }
+
+    // 4. OBS (solo Monroe)
+    if (format_type === 'MONROE') {
+      const obs = findCol(row, ['Obs', 'obs', 'OBS', 'Obs.', 'obs.', 'Observacion', 'observacion']);
+      let obsKey = obs && String(obs).trim() !== '' && String(obs).trim() !== '0' ? String(obs).trim() : 'Sin OBS';
+      if (obsKey.toLowerCase().includes('showcase')) obsKey = 'Showcase';
+      obsStats[obsKey] = (obsStats[obsKey] || 0) + 1;
     }
 
     totalDurationMinutes += durationMins;
@@ -192,6 +232,7 @@ export function processAnalytics(data, shifts, durRanges) {
   });
 
   console.log('[Parking] cat_dist:', categoryStats);
+  console.log('[Parking] obs_dist:', obsStats);
 
   return {
     kpis: {
@@ -208,6 +249,8 @@ export function processAnalytics(data, shifts, durRanges) {
     shift_table: shiftTable,
     dur_dist: durationStats,
     cat_dist: categoryStats,
+    obs_dist: obsStats,
+    format_type,
     daily_data: dailyData
   };
 }

@@ -104,7 +104,7 @@ export default function App() {
 
   const exportToExcel = () => {
     if (!results) return;
-    const { kpis, shift_table, dur_dist, cat_dist, daily_data } = results;
+    const { kpis, shift_table, dur_dist, cat_dist, obs_dist, format_type, daily_data } = results;
 
     const wb = XLSX.utils.book_new();
 
@@ -149,6 +149,14 @@ export default function App() {
       ...sortedDates.map(d => [d, daily_data[d].tickets, daily_data[d].revenue])
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(porDiaData), 'Por Día');
+
+    // 6. Observaciones (solo Monroe)
+    if (format_type === 'MONROE' && Object.keys(obs_dist).length > 0) {
+      const obsData = Object.entries(obs_dist)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => ({ 'Observación': k, 'Tickets': v }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(obsData), 'Observaciones');
+    }
 
     XLSX.writeFile(wb, `Analisis_${branch}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };

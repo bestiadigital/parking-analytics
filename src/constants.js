@@ -2,7 +2,7 @@ export const BRANCHES = {
   "BERUTI": { address: "Beruti 3359", label: "Sucursal Beruti", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "21:59", name: "Turno Tarde", start: "14:00"}, {end: "05:59", name: "Turno Noche", start: "22:00"}] },
   "CORRIENTES": { address: "Av. Corrientes 1237", label: "Sucursal Corrientes", ranges: [{end: "14:59", name: "Turno Mañana", start: "06:00"}, {end: "02:00", name: "Turno Tarde", start: "15:00"}] },
   "HOTEL_MADERO": { address: "Rosario Peñaloza 360", label: "Sucursal Hotel Madero", ranges: [] },
-  "MONROE": { address: "Av. Monroe 1655", label: "Sucursal Monroe", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "19:59", name: "Turno Tarde", start: "14:00"}, {end: "05:59", name: "Turno Noche", start: "20:00"}] },
+  "MONROE": { address: "Av. Monroe 1655", label: "Sucursal Monroe", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "21:59", name: "Turno Tarde", start: "14:00"}, {end: "05:59", name: "Turno Noche", start: "22:00"}] },
   "ORO": { address: "Fray Justo Santa María de Oro 2150", label: "Sucursal Oro", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "21:59", name: "Turno Tarde", start: "14:00"}, {end: "05:59", name: "Turno Noche", start: "22:00"}] },
   "RIVADAVIA": { address: "Av. Rivadavia 413", label: "Sucursal Rivadavia", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "02:00", name: "Turno Tarde", start: "14:00"}] },
   "RODRIGUEZ_PENA": { address: "Rodríguez Peña 835", label: "Sucursal Rodríguez Peña", ranges: [{end: "13:59", name: "Turno Mañana", start: "06:00"}, {end: "02:00", name: "Turno Tarde", start: "14:00"}] },
