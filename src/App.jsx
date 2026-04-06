@@ -104,7 +104,7 @@ export default function App() {
 
   const exportToExcel = () => {
     if (!results) return;
-    const { kpis, shift_table, dur_dist, cat_dist } = results;
+    const { kpis, shift_table, dur_dist, cat_dist, daily_data } = results;
 
     const wb = XLSX.utils.book_new();
 
@@ -119,16 +119,17 @@ export default function App() {
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiData), 'KPIs');
 
-    // 2. Detalle por Turno
-    const shiftData = shift_table.map(r => ({
-      'Turno': r.turno,
-      'Entradas': r.entradas,
-      'Salidas': r.salidas,
-      'Ingresos': r.importe,
-      'Ticket Promedio': r.avg_importe,
-      'Duración Promedio (min)': r.avg_dur
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(shiftData), 'Turnos');
+    // 2. Turnos — layout vertical: métricas como filas, turnos como columnas
+    const turnos = shift_table.map(r => r.turno);
+    const turnosSheet = [
+      ['', ...turnos],
+      ['Entradas',          ...shift_table.map(r => r.entradas)],
+      ['Salidas',           ...shift_table.map(r => r.salidas)],
+      ['Ingresos',          ...shift_table.map(r => r.importe)],
+      ['Ticket Promedio',   ...shift_table.map(r => r.avg_importe)],
+      ['Duración Promedio', ...shift_table.map(r => r.avg_dur)],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(turnosSheet), 'Turnos');
 
     // 3. Duración (horizontal: headers en fila 1, valores en fila 2)
     const durEntries = Object.entries(dur_dist);
@@ -140,6 +141,14 @@ export default function App() {
     const CATEGORIAS = ['Auto', 'SUV', 'Camioneta', 'Moto', 'Bici'];
     const catData = CATEGORIAS.map(cat => ({ 'Categoría': cat, 'Tickets': cat_dist[cat] || 0 }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catData), 'Categorías');
+
+    // 5. Por Día
+    const sortedDates = Object.keys(daily_data).sort();
+    const porDiaData = [
+      ['Fecha', 'Tickets', 'Importe'],
+      ...sortedDates.map(d => [d, daily_data[d].tickets, daily_data[d].revenue])
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(porDiaData), 'Por Día');
 
     XLSX.writeFile(wb, `Analisis_${branch}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
