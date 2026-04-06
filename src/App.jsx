@@ -137,7 +137,8 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([durHeaders, durValues]), 'Duración');
 
     // 4. Categorias
-    const catData = Object.entries(cat_dist).map(([k, v]) => ({ 'Categoría': k, 'Tickets': v }));
+    const CATEGORIAS = ['Auto', 'SUV', 'Camioneta', 'Moto', 'Bici'];
+    const catData = CATEGORIAS.map(cat => ({ 'Categoría': cat, 'Tickets': cat_dist[cat] || 0 }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catData), 'Categorías');
 
     XLSX.writeFile(wb, `Analisis_${branch}_${new Date().toISOString().slice(0, 10)}.xlsx`);

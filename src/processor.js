@@ -7,7 +7,30 @@ export function parseExcelContent(arrayBuffer) {
   const sheet = workbook.Sheets[sheetName];
   // Parse with raw strings to keep date formats or formatting
   const data = XLSX.utils.sheet_to_json(sheet, { raw: false, dateNF: 'yyyy-mm-dd hh:mm:ss' });
+
+  // Debug: log column names and first row to console
+  if (data.length > 0) {
+    console.log('[Parking] Columnas detectadas:', Object.keys(data[0]));
+    console.log('[Parking] Primera fila:', data[0]);
+    console.log('[Parking] Columnas normalizadas:', Object.keys(data[0]).map(k => norm(k)));
+  }
+
   return data;
+}
+
+// Normaliza string: minúsculas, sin acentos, sin espacios extra
+function norm(str) {
+  return str.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// Helper: finds a value in a row by trying multiple possible column names (case-insensitive, accent-insensitive)
+function findCol(row, candidates) {
+  const keys = Object.keys(row);
+  for (const candidate of candidates) {
+    const found = keys.find(k => norm(k) === norm(candidate));
+    if (found !== undefined && row[found] !== undefined && row[found] !== '') return row[found];
+  }
+  return null;
 }
 
 export function processAnalytics(data, shifts, durRanges) {
@@ -31,14 +54,25 @@ export function processAnalytics(data, shifts, durRanges) {
 
   data.forEach((row, i) => {
     // 1. Encontrar valores (flexibilidad con nombres de columnas)
-    const estado = row['Estado'] || row['estado'] || '';
-    const importeStr = row['Importe'] || row['Total'] || '0';
-    let importe = parseFloat(importeStr.replace(/[^0-9,-]+/g,"").replace(',', '.')) || 0;
-    const isCancelado = estado.trim().toLowerCase() === 'cancelado';
-    const hasCancelacion = Object.keys(row).some(k => k.toLowerCase().includes('cancelaci') && row[k]);
-    
-    // Filtro principal: Ignorar 'Cancelado' o (Importe = 0 y sin cancelación)
-    if (isCancelado || (importe === 0 && !hasCancelacion)) {
+    const importeRaw = findCol(row, ['Importe', 'Total', 'Monto', 'Precio', 'Valor', 'importe', 'total']);
+    const importeStr = importeRaw != null ? String(importeRaw) : '0';
+    // Soporta formatos: "$10,625.00" (US) y "$10.625,00" (AR)
+    let importe = 0;
+    const cleanStr = importeStr.replace(/[^0-9.,]/g, '');
+    if (cleanStr.match(/,\d{2}$/)) {
+      // Formato AR: punto=miles, coma=decimal → "10.625,00"
+      importe = parseFloat(cleanStr.replace(/\./g, '').replace(',', '.')) || 0;
+    } else {
+      // Formato US: coma=miles, punto=decimal → "10,625.00"
+      importe = parseFloat(cleanStr.replace(/,/g, '')) || 0;
+    }
+
+    // Detección de cancelación: columna "Cancelado" vale "Cancelado"; "-" = no cancelado
+    const canceladoVal = findCol(row, ['Cancelado', 'cancelado', 'Estado', 'estado', 'Status']);
+    const isCancelado = canceladoVal != null && String(canceladoVal).trim().toLowerCase() === 'cancelado';
+
+    // Filtro principal: Ignorar cancelados o tickets sin importe
+    if (isCancelado || importe === 0) {
       excludedCount++;
       return;
     }
@@ -47,8 +81,8 @@ export function processAnalytics(data, shifts, durRanges) {
     totalRevenue += importe;
 
     // Calcular duración y turno de ingreso
-    const ingreso = row['Fecha Ingreso'] || row['Ingreso'] || row['Entrada'];
-    const egreso = row['Fecha Egreso'] || row['Egreso'] || row['Salida'];
+    const ingreso = findCol(row, ['Desde', 'desde', 'Fecha Ingreso', 'Ingreso', 'Entrada', 'fecha ingreso', 'ingreso', 'entrada', 'FechaIngreso']);
+    const egreso = findCol(row, ['Hasta', 'hasta', 'Fecha Egreso', 'Egreso', 'Salida', 'fecha egreso', 'egreso', 'salida', 'FechaEgreso']);
 
     let ingresoDate = parseDateString(ingreso);
     let egresoDate = parseDateString(egreso);
@@ -60,7 +94,7 @@ export function processAnalytics(data, shifts, durRanges) {
        }
     } else {
        // Alternativa: buscar columna de duración si existe
-       const durStr = row['Duración'] || row['Tiempo'] || '';
+       const durStr = findCol(row, ['Duración', 'Duracion', 'Tiempo', 'duración', 'duracion', 'tiempo']) || '';
        const match = durStr.match(/(\d+)\s*(hs|h|min|m)/i);
        if (match) {
            durationMins = match[2].toLowerCase().startsWith('h') ? parseInt(match[1])*60 : parseInt(match[1]);
@@ -132,8 +166,8 @@ export function processAnalytics(data, shifts, durRanges) {
         durationStats[assignedDur]++;
     }
 
-    // Categorias Vehículos
-    const category = row['Vehículo'] || row['Tipo'] || row['Categoría'] || 'Auto';
+    // Categorias Vehículos (Categoría va primero; Tipo es tipo de estadía, no vehículo)
+    const category = findCol(row, ['Categoría', 'Categoria', 'Vehículo', 'Vehiculo', 'categoría', 'categoria', 'vehículo', 'vehiculo']) || 'Auto';
     categoryStats[category] = (categoryStats[category] || 0) + 1;
   });
 
@@ -156,6 +190,8 @@ export function processAnalytics(data, shifts, durRanges) {
           avg_dur: s.tickets > 0 ? s.duracionTotal / s.tickets : 0
       };
   });
+
+  console.log('[Parking] cat_dist:', categoryStats);
 
   return {
     kpis: {
