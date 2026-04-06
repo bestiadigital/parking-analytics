@@ -94,9 +94,13 @@ export function processAnalytics(data, shifts, durRanges) {
       ? (canceladoStr === 'verdadero' || canceladoStr === 'true')
       : (canceladoStr === 'cancelado');
 
-    if (isCancelado || importe === 0) {
-      excludedCount++;
-      return;
+    if (format_type === 'MONROE') {
+      // Monroe: solo se excluye si Cancelado = Verdadero
+      // importe=0 + Falso + OBS vacío = TOLERANCIA (ticket operativo válido)
+      if (isCancelado) { excludedCount++; return; }
+    } else {
+      // Estándar: se excluye si cancelado o importe = 0
+      if (isCancelado || importe === 0) { excludedCount++; return; }
     }
 
     operativeCount++;
@@ -136,7 +140,9 @@ export function processAnalytics(data, shifts, durRanges) {
     // 4. OBS (solo Monroe)
     if (format_type === 'MONROE') {
       const obs = findCol(row, ['Obs', 'obs', 'OBS', 'Obs.', 'obs.', 'Observacion', 'observacion']);
-      let obsKey = obs && String(obs).trim() !== '' && String(obs).trim() !== '0' ? String(obs).trim() : 'Sin OBS';
+      let obsKey = obs && String(obs).trim() !== '' && String(obs).trim() !== '0' ? String(obs).trim() : null;
+      if (!obsKey && importe === 0) obsKey = 'Tolerancia';
+      if (!obsKey) obsKey = 'Sin OBS';
       if (obsKey.toLowerCase().includes('showcase')) obsKey = 'Showcase';
       obsStats[obsKey] = (obsStats[obsKey] || 0) + 1;
     }
