@@ -75,8 +75,8 @@ BRANCHES = {
         'address': 'Av. Monroe 1655, C1428',
         'ranges': [
             {'name': 'Turno Mañana', 'start': '06:00', 'end': '13:59'},
-            {'name': 'Turno Tarde',  'start': '14:00', 'end': '19:59'},
-            {'name': 'Turno Noche',  'start': '20:00', 'end': '05:59'},
+            {'name': 'Turno Tarde',  'start': '14:00', 'end': '21:59'},
+            {'name': 'Turno Noche',  'start': '22:00', 'end': '05:59'},
         ],
     },
 }
