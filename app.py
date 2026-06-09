@@ -201,6 +201,9 @@ def normalize_monroe(df: pd.DataFrame) -> pd.DataFrame:
     # Acuerdos desde OBS (vacío = sin acuerdo)
     out['Empresa Acuerdo'] = out['OBS'].astype(str).str.strip().replace({'nan': '', 'NaN': ''})
 
+    # Monroe: importe 0 no cancelado = operativo válido (tráfico corto o convenio $0)
+    out['_allow_zero_importe'] = True
+
     return out
 
 
@@ -231,10 +234,14 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
     else:
         df['dur_min'] = None
 
+    allow_zero = '_allow_zero_importe' in df.columns
+
     def operativo(row):
         cancelado = str(row.get('Cancelado', '') or '').strip()
         if cancelado == 'Cancelado':
             return False
+        if allow_zero:
+            return True
         try:
             importe = float(row.get('_importe', 0) or 0)
         except (TypeError, ValueError):
