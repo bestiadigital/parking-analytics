@@ -167,8 +167,19 @@ El caché en memoria es un `OrderedDict` limitado a 100 entradas (LRU). Si el se
 - Monroe normalizado y validado contra los números de administración (14.090 tickets operativos para mayo 2026)
 - El nuevo formato de reporte estándar (columna `Cobrado` en lugar de `Importe`) está implementado con fallback al formato viejo para compatibilidad
 - Export Excel alineado con el formato de referencia de administración
+- Código auditado y bugs corregidos (ver sección siguiente)
+
+## Bugs corregidos (auditoría junio 2026)
+
+- **Salidas por turno incorrectas:** la `shift_table` ahora incluye todos los turnos que aparecen en entradas O salidas, no solo los que tienen entradas. Un turno con salidas pero sin entradas ya no reporta `salidas: 0`.
+- **Preview mostraba `"nan"`:** el `fillna('')` ahora se aplica antes del `astype(str)` en el endpoint `/api/upload`.
+- **Endpoints sin validación JSON:** `/api/analyze` y `/api/export/excel` usan `get_json_payload()` que devuelve 400 limpio ante payload inválido o ausente, en vez de 500.
+- **`tipo_dist` eliminado:** se calculaba y devolvía pero no se usaba en UI ni en export.
+- **`DEFAULT_DUR_RANGES` deduplicado:** el backend inyecta el valor al template via `tojson`. El HTML ya no tiene el valor hardcodeado — si cambia en `app.py`, el frontend refleja el cambio automáticamente.
+- **Inconsistencia UI Monroe:** el criterio "Exclusión No Operativo" en el sidebar ahora se actualiza dinámicamente al seleccionar Monroe, mostrando que importe $0 sin cancelación es operativo válido.
 
 ## Pendiente / conocido
 
 - Hotel Madero no tiene rangos de turno configurados — cuando se defina el horario operativo hay que agregarlo en `BRANCHES['HOTEL_MADERO']['ranges']`
 - El caché es volátil: un reinicio del servidor (frecuente en Render free) invalida todos los `file_id` activos
+- El botón "PDF" usa `window.print()` — funciona si el usuario elige "Guardar como PDF" desde el diálogo de impresión del browser, pero no genera un PDF programático

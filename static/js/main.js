@@ -31,6 +31,16 @@ function onBranchChange() {
   document.getElementById('branchAddress').textContent = b.address || '';
   document.getElementById('headerBranch').textContent  = b.label   || key;
   renderRanges(b.ranges || []);
+  updateOperationalCriteria(key);
+}
+
+function updateOperationalCriteria(branchKey) {
+  const zeroCriterion = document.getElementById('zeroAmountCriterion');
+  if (!zeroCriterion) return;
+
+  zeroCriterion.textContent = branchKey === 'MONROE'
+    ? 'Monroe: importe = 0 sin cancelación se considera operativo'
+    : 'Importe = 0 y sin cancelación';
 }
 
 /* ── DROPZONE ────────────────────────────────────────────────────────────── */

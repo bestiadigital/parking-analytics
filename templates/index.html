@@ -106,7 +106,7 @@
       <label class="sb-label">Exclusión "No Operativo"</label>
       <ul>
         <li>Cancelado = <code>Cancelado</code></li>
-        <li>Importe = 0 y sin cancelación</li>
+        <li id="zeroAmountCriterion">Importe = 0 y sin cancelación</li>
       </ul>
     </div>
 
@@ -218,12 +218,7 @@
 <script>
   // Inject Python data into JS
   const BRANCHES = {{ branches | tojson }};
-  const DEFAULT_DUR_RANGES = [
-    { name: '0 – 60 min',  from_min: 0,   to_min: 60  },
-    { name: '1 – 2 hs',    from_min: 61,  to_min: 120 },
-    { name: '2 – 3 hs',    from_min: 121, to_min: 180 },
-    { name: '+3 hs',        from_min: 181, to_min: null },
-  ];
+  const DEFAULT_DUR_RANGES = {{ default_dur_ranges | tojson }};
 </script>
 <script src="/static/js/main.js"></script>
 </body>

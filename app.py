@@ -97,6 +97,13 @@ def cache_put(file_id, df):
     file_cache[file_id] = df
 
 
+def get_json_payload():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def parse_duration_minutes(valor):
     if valor is None:
         return None
@@ -290,27 +297,25 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
     # salidas por turno
     salidas_by_turno  = df_op.groupby('turno_salida').size().to_dict()
 
-    shift_stats = {}
-    for turno, grp in df_op.groupby('turno_entrada'):
-        shift_stats[str(turno)] = {
-            'turno':      str(turno),
-            'entradas':   int(entradas_by_turno.get(turno, 0)),
-            'salidas':    int(salidas_by_turno.get(turno, 0)),
-            'importe':    float(grp['_importe'].sum()),
-            'avg_importe':float(grp['_importe'].mean()) if len(grp) > 0 else 0,
-            'avg_dur':    float(grp['dur_min'].mean()) if grp['dur_min'].notna().any() else 0,
-        }
+    entry_groups = {str(turno): grp for turno, grp in df_op.groupby('turno_entrada')}
+    extra_turnos = [
+        str(turno)
+        for turno in list(entradas_by_turno.keys()) + list(salidas_by_turno.keys())
+        if str(turno) not in shift_order
+    ]
+    all_turnos = list(dict.fromkeys(shift_order + extra_turnos))
 
     shift_table = []
-    for name in shift_order:
-        shift_table.append(shift_stats.get(name, {
-            'turno': name, 'entradas': 0, 'salidas': 0,
-            'importe': 0, 'avg_importe': 0, 'avg_dur': 0,
-        }))
-    if 'Sin turno' in shift_stats and shift_order:
-        shift_table.append(shift_stats['Sin turno'])
-    if not shift_order:
-        shift_table = list(shift_stats.values())
+    for turno in all_turnos:
+        grp = entry_groups.get(turno)
+        shift_table.append({
+            'turno':       turno,
+            'entradas':    int(entradas_by_turno.get(turno, 0)),
+            'salidas':     int(salidas_by_turno.get(turno, 0)),
+            'importe':     float(grp['_importe'].sum()) if grp is not None else 0,
+            'avg_importe': float(grp['_importe'].mean()) if grp is not None and len(grp) > 0 else 0,
+            'avg_dur':     float(grp['dur_min'].mean()) if grp is not None and grp['dur_min'].notna().any() else 0,
+        })
 
     dur_order  = [r['name'] for r in dur_ranges]
     dur_counts = df_op['dur_bucket'].value_counts().to_dict()
@@ -329,9 +334,6 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
 
     cat_dist  = {str(k): int(v) for k, v in df_op['Categoría'].value_counts().items()} \
                 if 'Categoría' in df_op.columns else {}
-    tipo_dist = {str(k): int(v) for k, v in df_op['Tipo'].value_counts().items()} \
-                if 'Tipo' in df_op.columns else {}
-
     # Distribución por empresa acuerdo: empresas con nombre + celda vacía = sin acuerdo
     acuerdo_dist = {}
     acuerdo_sin_acuerdo = 0
@@ -374,7 +376,6 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
         'dur_dist':     dur_dist,
         'daily_data':   daily_data,
         'cat_dist':     cat_dist,
-        'tipo_dist':    tipo_dist,
         'acuerdo_dist':         acuerdo_dist,
         'acuerdo_sin_acuerdo':  acuerdo_sin_acuerdo,
         'acuerdo_desglose':     acuerdo_desglose,
@@ -385,7 +386,7 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
 
 @app.route('/')
 def index():
-    return render_template('index.html', branches=BRANCHES)
+    return render_template('index.html', branches=BRANCHES, default_dur_ranges=DEFAULT_DUR_RANGES)
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -405,7 +406,7 @@ def upload():
             'file_id':  file_id,
             'rows':     len(df),
             'columns':  list(df.columns),
-            'preview':  df.head(6).astype(str).fillna('').values.tolist(),
+            'preview':  df.head(6).where(pd.notna(df.head(6)), '').astype(str).values.tolist(),
         })
     except Exception as e:
         return jsonify({'error': f'Error al leer el archivo: {e}'}), 500
@@ -413,7 +414,9 @@ def upload():
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
-    data       = request.get_json()
+    data       = get_json_payload()
+    if data is None:
+        return jsonify({'error': 'JSON inválido'}), 400
     file_id    = data.get('file_id')
     branch     = data.get('branch', '')
     ranges     = data.get('ranges', [])
@@ -434,7 +437,9 @@ def analyze():
 
 @app.route('/api/export/excel', methods=['POST'])
 def export_excel():
-    data       = request.get_json()
+    data       = get_json_payload()
+    if data is None:
+        return jsonify({'error': 'JSON inválido'}), 400
     file_id    = data.get('file_id')
     branch     = data.get('branch', 'SIN_SUCURSAL')
     ranges     = data.get('ranges', [])
