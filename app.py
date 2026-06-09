@@ -188,8 +188,9 @@ def normalize_monroe(df: pd.DataFrame) -> pd.DataFrame:
             return None
     out['Tiempo'] = out.apply(build_tiempo, axis=1)
 
-    # Importe cobrado
-    out['Cobrado'] = pd.to_numeric(out['IMPORTE'], errors='coerce').fillna(0)
+    # Importe cobrado (tarifa del ticket) e importe pagado (lo que realmente abonó)
+    out['Cobrado']         = pd.to_numeric(out['IMPORTE'],        errors='coerce').fillna(0)
+    out['_importe_pagado'] = pd.to_numeric(out['IMPORTE PAGADO'], errors='coerce').fillna(0)
 
     # Cancelado: bool True → string 'Cancelado'
     out['Cancelado'] = out['CANCELADO'].apply(lambda v: 'Cancelado' if v is True or str(v).lower() == 'true' else '-')
@@ -334,11 +335,31 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
     # Distribución por empresa acuerdo: empresas con nombre + celda vacía = sin acuerdo
     acuerdo_dist = {}
     acuerdo_sin_acuerdo = 0
+    acuerdo_desglose = []   # lista con detalle por empresa (Monroe)
     if 'Empresa Acuerdo' in df_op.columns:
         col = df_op['Empresa Acuerdo'].astype(str).str.strip()
+
+        # Agrupar variantes de Showcase en un solo bloque
+        col = col.apply(lambda x: 'SHOWCASE' if x.upper().startswith('SHOWCASE') else x)
+        df_op = df_op.copy()
+        df_op['_empresa_norm'] = col
+
         mask_vacio = col.isin(['', 'nan', 'NaN', 'None'])
         acuerdo_sin_acuerdo = int(mask_vacio.sum())
         acuerdo_dist = {str(k): int(v) for k, v in col[~mask_vacio].value_counts().items()}
+
+        # Desglose Igual a $0 / Mayor que $0 (solo cuando hay importe pagado, ej. Monroe)
+        if '_importe_pagado' in df_op.columns:
+            df_ac = df_op[~mask_vacio].copy()
+            for empresa, grp in df_ac.groupby('_empresa_norm'):
+                acuerdo_desglose.append({
+                    'empresa':     str(empresa),
+                    'tickets':     int(len(grp)),
+                    'igual_cero':  int((grp['_importe_pagado'] == 0).sum()),
+                    'mayor_cero':  int((grp['_importe_pagado'] > 0).sum()),
+                })
+            # Ordenar por tickets desc
+            acuerdo_desglose.sort(key=lambda x: x['tickets'], reverse=True)
 
     return {
         'kpis': {
@@ -356,6 +377,7 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
         'tipo_dist':    tipo_dist,
         'acuerdo_dist':         acuerdo_dist,
         'acuerdo_sin_acuerdo':  acuerdo_sin_acuerdo,
+        'acuerdo_desglose':     acuerdo_desglose,
     }
 
 
@@ -473,12 +495,33 @@ def export_excel():
 
         # ── Acuerdos (solo si hay datos) ───────────────────────────────────
         if result.get('acuerdo_dist') or result.get('acuerdo_sin_acuerdo'):
-            rows_ac = [{'Empresa Acuerdo': k, 'Tickets': v}
-                       for k, v in result['acuerdo_dist'].items()]
-            rows_ac.append({'Empresa Acuerdo': '(Sin acuerdo / celda vacía)',
-                            'Tickets': result.get('acuerdo_sin_acuerdo', 0)})
-            rows_ac.append({'Empresa Acuerdo': 'TOTAL',
-                            'Tickets': sum(r['Tickets'] for r in rows_ac)})
+            desglose = result.get('acuerdo_desglose', [])
+            if desglose:
+                # Formato Monroe: con columnas Igual a $0 / Mayor que $0
+                rows_ac = [{'Empresa Acuerdo': r['empresa'],
+                             'Tickets':        r['tickets'],
+                             'Igual a $0':     r['igual_cero'],
+                             'Mayor que $0':   r['mayor_cero']} for r in desglose]
+                rows_ac.append({
+                    'Empresa Acuerdo': '(Sin acuerdo / celda vacía)',
+                    'Tickets':       result.get('acuerdo_sin_acuerdo', 0),
+                    'Igual a $0':    '',
+                    'Mayor que $0':  '',
+                })
+                rows_ac.append({
+                    'Empresa Acuerdo': 'TOTAL',
+                    'Tickets': sum(r['Tickets'] for r in rows_ac if isinstance(r['Tickets'], int)),
+                    'Igual a $0':   sum(r['Igual a $0']   for r in rows_ac if isinstance(r.get('Igual a $0'), int)),
+                    'Mayor que $0': sum(r['Mayor que $0'] for r in rows_ac if isinstance(r.get('Mayor que $0'), int)),
+                })
+            else:
+                # Formato estándar: solo tickets por empresa
+                rows_ac = [{'Empresa Acuerdo': k, 'Tickets': v}
+                           for k, v in result['acuerdo_dist'].items()]
+                rows_ac.append({'Empresa Acuerdo': '(Sin acuerdo / celda vacía)',
+                                'Tickets': result.get('acuerdo_sin_acuerdo', 0)})
+                rows_ac.append({'Empresa Acuerdo': 'TOTAL',
+                                'Tickets': sum(r['Tickets'] for r in rows_ac)})
             pd.DataFrame(rows_ac).to_excel(writer, sheet_name='Acuerdos', index=False)
 
     output.seek(0)
