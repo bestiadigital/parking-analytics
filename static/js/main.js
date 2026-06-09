@@ -241,13 +241,12 @@ function renderResults(data) {
 
 function renderKPIs(k) {
   const container = document.getElementById('kpisRow');
-  const avgDurStr = formatMinutes(k.avg_dur_min);
   container.innerHTML = `
-    ${kpiCard(k.total_operativo.toLocaleString('es-AR'), 'Tickets operativos', 'info', 'blue')}
-    ${kpiCard(k.total_excluidos.toLocaleString('es-AR'), 'Excluidos',          'warn', 'amber')}
-    ${kpiCard(formatCurrency(k.total_importe),            'Ingresos totales',   'ok',   'green')}
-    ${kpiCard(formatCurrency(k.avg_importe),              'Ticket promedio',    '',     '')}
-    ${kpiCard(avgDurStr,                                  'Duración promedio',  '',     '')}
+    ${kpiCard(k.total_operativo.toLocaleString('es-AR'), 'Tickets Operativos',        'info', 'blue')}
+    ${kpiCard(formatCurrency(k.total_importe),            'Ingresos Totales',          'ok',   'green')}
+    ${kpiCard(formatCurrency(k.avg_importe),              'Ticket Promedio',           '',     '')}
+    ${kpiCard(formatMinutes(k.avg_dur_min),               'Duración Promedio',         '',     '')}
+    ${kpiCard(k.total_excluidos.toLocaleString('es-AR'), 'Excluidos (Cancelados o $0)', 'warn', 'amber')}
   `;
 }
 
@@ -269,7 +268,7 @@ function renderCharts(data) {
 
   // --- Tickets por turno (horizontal bar) ---
   const shiftLabels = shift_table.map(r => r.turno);
-  const shiftTickets = shift_table.map(r => r.tickets);
+  const shiftTickets = shift_table.map(r => r.entradas || 0);
   state.charts.turnos = new Chart(ctx('chartTurnos'), {
     type: 'bar',
     data: {
@@ -323,6 +322,31 @@ function renderCharts(data) {
     },
     options: doughnutOpts(v => `${v.toLocaleString('es-AR')} vehículos`),
   });
+
+  // --- Empresa Acuerdo (bar horizontal) ---
+  const acuerdoCard  = document.getElementById('chartAcuerdoCard');
+  const acuerdoCanvas = document.getElementById('chartAcuerdo');
+  const acuerdo_dist = data.acuerdo_dist || {};
+  if (acuerdoCard && acuerdoCanvas && Object.keys(acuerdo_dist).length) {
+    acuerdoCard.classList.remove('hidden');
+    const acLabels = Object.keys(acuerdo_dist);
+    const acData   = Object.values(acuerdo_dist);
+    state.charts.acuerdo = new Chart(acuerdoCanvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: acLabels,
+        datasets: [{
+          data: acData,
+          backgroundColor: acLabels.map((_, i) => PALETTE[i % PALETTE.length]),
+          borderRadius: 6,
+          borderSkipped: false,
+        }],
+      },
+      options: hbarOpts('Tickets', v => v.toLocaleString('es-AR')),
+    });
+  } else if (acuerdoCard) {
+    acuerdoCard.classList.add('hidden');
+  }
 
   // --- Evolución diaria (line) ---
   const sortedDates = Object.keys(daily_data).sort();
@@ -419,7 +443,8 @@ function renderShiftTable(rows) {
   let html = `
     <thead><tr>
       <th>Turno</th>
-      <th class="num">Tickets</th>
+      <th class="num">Entradas</th>
+      <th class="num">Salidas</th>
       <th class="num">Ingresos</th>
       <th class="num">Ticket Prom.</th>
       <th class="num">Duración Prom.</th>
@@ -428,7 +453,8 @@ function renderShiftTable(rows) {
   rows.forEach(r => {
     html += `<tr>
       <td>${esc(r.turno)}</td>
-      <td class="num">${(r.tickets || 0).toLocaleString('es-AR')}</td>
+      <td class="num">${(r.entradas || 0).toLocaleString('es-AR')}</td>
+      <td class="num">${(r.salidas  || 0).toLocaleString('es-AR')}</td>
       <td class="num">${formatCurrency(r.importe || 0)}</td>
       <td class="num">${formatCurrency(r.avg_importe || 0)}</td>
       <td class="num">${formatMinutes(r.avg_dur || 0)}</td>

@@ -56,14 +56,20 @@ body {
 }
 .logo {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-end;
+  gap: 12px;
+}
+.logo-img {
+  height: 32px;
+  width: auto;
 }
 .logo-text {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 400;
   letter-spacing: -0.3px;
   color: var(--text);
+  line-height: 1;
+  padding-bottom: 2px;
 }
 .header-branch {
   font-size: 13px;

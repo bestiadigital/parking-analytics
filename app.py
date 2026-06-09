@@ -28,7 +28,7 @@ BRANCHES = {
         'label': 'Sucursal Rodríguez Peña',
         'address': 'Rodríguez Peña 835',
         'ranges': [
-            {'name': 'Turno Mañana', 'start': '06:00', 'end': '13:59'},
+            {'name': 'Turno Mañana', 'start': '05:00', 'end': '13:59'},
             {'name': 'Turno Tarde',  'start': '14:00', 'end': '02:00'},
         ],
     },
@@ -36,8 +36,8 @@ BRANCHES = {
         'label': 'Sucursal Corrientes',
         'address': 'Av. Corrientes 1237',
         'ranges': [
-            {'name': 'Turno Mañana', 'start': '06:00', 'end': '14:59'},
-            {'name': 'Turno Tarde',  'start': '15:00', 'end': '02:00'},
+            {'name': 'Turno Mañana', 'start': '05:00', 'end': '14:59'},
+            {'name': 'Turno Tarde',  'start': '15:00', 'end': '03:00'},
         ],
     },
     'BERUTI': {
@@ -53,7 +53,7 @@ BRANCHES = {
         'label': 'Sucursal Rivadavia',
         'address': 'Av. Rivadavia 413',
         'ranges': [
-            {'name': 'Turno Mañana', 'start': '06:00', 'end': '13:59'},
+            {'name': 'Turno Mañana', 'start': '05:00', 'end': '13:59'},
             {'name': 'Turno Tarde',  'start': '14:00', 'end': '02:00'},
         ],
     },
@@ -155,11 +155,69 @@ def dur_bucket(minutes, dur_ranges):
     return 'Sin datos'
 
 
+def normalize_monroe(df: pd.DataFrame) -> pd.DataFrame:
+    """Convierte el formato crudo de Monroe al formato estándar."""
+    out = df.copy()
+
+    # Fecha+hora de ingreso → Desde
+    ingreso = (
+        out['INGRESO FECHA'].astype(str) + ' ' +
+        out['INGRESO HORA'].fillna(0).astype(int).astype(str).str.zfill(2) + ':' +
+        out['INGRESO MINUTO'].fillna(0).astype(int).astype(str).str.zfill(2)
+    )
+    out['Desde'] = pd.to_datetime(ingreso, format='%d/%m/%Y %H:%M', errors='coerce')
+
+    # Fecha+hora de egreso → Hasta
+    egreso = (
+        out['EGRESO FECHA'].astype(str) + ' ' +
+        out['EGRESO HORA'].fillna(0).astype(int).astype(str).str.zfill(2) + ':' +
+        out['EGRESO MINUTO'].fillna(0).astype(int).astype(str).str.zfill(2)
+    )
+    out['Hasta'] = pd.to_datetime(egreso, format='%d/%m/%Y %H:%M', errors='coerce')
+
+    # Permanencia → Tiempo (formato "Xd HH:MM" compatible con parse_duration_minutes)
+    def build_tiempo(row):
+        try:
+            d = int(row.get('PERM. DIAS', 0) or 0)
+            h = int(row.get('PERM. HORAS', 0) or 0)
+            m = int(row.get('PERM. MINS.', 0) or 0)
+            if d > 0:
+                return f'{d}d {h:02d}:{m:02d}'
+            return f'{h:02d}:{m:02d}'
+        except Exception:
+            return None
+    out['Tiempo'] = out.apply(build_tiempo, axis=1)
+
+    # Importe cobrado
+    out['Cobrado'] = pd.to_numeric(out['IMPORTE'], errors='coerce').fillna(0)
+
+    # Cancelado: bool True → string 'Cancelado'
+    out['Cancelado'] = out['CANCELADO'].apply(lambda v: 'Cancelado' if v is True or str(v).lower() == 'true' else '-')
+
+    # Categoría y Tipo
+    out['Categoría'] = out['CATEGORIA']
+    out['Tipo']      = out['TIPO']
+
+    # Acuerdos desde OBS (vacío = sin acuerdo)
+    out['Empresa Acuerdo'] = out['OBS'].astype(str).str.strip().replace({'nan': '', 'NaN': ''})
+
+    return out
+
+
 def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
     df = df.copy()
 
-    if 'Importe' in df.columns:
-        df['Importe'] = pd.to_numeric(df['Importe'], errors='coerce').fillna(0)
+    # Detectar formato Monroe por presencia de columnas propias y normalizar
+    if 'INGRESO FECHA' in df.columns:
+        df = normalize_monroe(df)
+
+    # Normalizar columna de importe: soporta tanto 'Cobrado' (nuevo) como 'Importe' (legacy Monroe)
+    if 'Cobrado' in df.columns:
+        df['_importe'] = pd.to_numeric(df['Cobrado'], errors='coerce').fillna(0)
+    elif 'Importe' in df.columns:
+        df['_importe'] = pd.to_numeric(df['Importe'], errors='coerce').fillna(0)
+    else:
+        df['_importe'] = 0
 
     for col in ['Desde', 'Hasta']:
         if col in df.columns:
@@ -178,7 +236,7 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
         if cancelado == 'Cancelado':
             return False
         try:
-            importe = float(row.get('Importe', 0) or 0)
+            importe = float(row.get('_importe', 0) or 0)
         except (TypeError, ValueError):
             importe = 0
         if importe == 0 and cancelado in ('', '-', '_'):
@@ -191,36 +249,55 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
     df_op      = df[df['_op']].copy()
     total_op   = len(df_op)
 
+    # turno de entrada (Desde) y turno de salida (Hasta)
     if 'Desde_dt' in df_op.columns:
-        df_op['turno'] = df_op['Desde_dt'].apply(
+        df_op['turno_entrada'] = df_op['Desde_dt'].apply(
             lambda dt: get_shift(dt, ranges) if pd.notna(dt) else 'Sin datos'
         )
         df_op['fecha'] = df_op['Desde_dt'].dt.date
     else:
-        df_op['turno'] = 'Sin datos'
+        df_op['turno_entrada'] = 'Sin datos'
         df_op['fecha'] = None
+
+    if 'Hasta_dt' in df_op.columns:
+        df_op['turno_salida'] = df_op['Hasta_dt'].apply(
+            lambda dt: get_shift(dt, ranges) if pd.notna(dt) else 'Sin datos'
+        )
+    else:
+        df_op['turno_salida'] = 'Sin datos'
+
+    # mantener compatibilidad: turno = turno de entrada
+    df_op['turno'] = df_op['turno_entrada']
 
     df_op['dur_bucket'] = df_op['dur_min'].apply(lambda m: dur_bucket(m, dur_ranges))
 
-    total_importe = float(df_op['Importe'].sum()) if 'Importe' in df_op.columns else 0
-    avg_importe   = float(df_op['Importe'].mean()) if total_op > 0 and 'Importe' in df_op.columns else 0
+    total_importe = float(df_op['_importe'].sum())
+    avg_importe   = float(df_op['_importe'].mean()) if total_op > 0 else 0
     avg_dur       = float(df_op['dur_min'].mean()) if df_op['dur_min'].notna().any() else 0
 
     shift_order = [r['name'] for r in ranges] if ranges else []
+
+    # entradas por turno
+    entradas_by_turno = df_op.groupby('turno_entrada').size().to_dict()
+    # salidas por turno
+    salidas_by_turno  = df_op.groupby('turno_salida').size().to_dict()
+
     shift_stats = {}
-    for turno, grp in df_op.groupby('turno'):
+    for turno, grp in df_op.groupby('turno_entrada'):
         shift_stats[str(turno)] = {
             'turno':      str(turno),
-            'tickets':    int(len(grp)),
-            'importe':    float(grp['Importe'].sum()) if 'Importe' in grp.columns else 0,
-            'avg_importe':float(grp['Importe'].mean()) if len(grp) > 0 and 'Importe' in grp.columns else 0,
+            'entradas':   int(entradas_by_turno.get(turno, 0)),
+            'salidas':    int(salidas_by_turno.get(turno, 0)),
+            'importe':    float(grp['_importe'].sum()),
+            'avg_importe':float(grp['_importe'].mean()) if len(grp) > 0 else 0,
             'avg_dur':    float(grp['dur_min'].mean()) if grp['dur_min'].notna().any() else 0,
         }
 
     shift_table = []
     for name in shift_order:
         shift_table.append(shift_stats.get(name, {
-            'turno': name, 'tickets': 0, 'importe': 0, 'avg_importe': 0, 'avg_dur': 0
+            'turno': name, 'entradas': 0, 'salidas': 0,
+            'importe': 0, 'avg_importe': 0, 'avg_dur': 0,
         }))
     if 'Sin turno' in shift_stats and shift_order:
         shift_table.append(shift_stats['Sin turno'])
@@ -239,13 +316,22 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
         for fecha, grp in df_op.groupby('fecha'):
             daily_data[str(fecha)] = {
                 'tickets': int(len(grp)),
-                'importe': float(grp['Importe'].sum()) if 'Importe' in grp.columns else 0,
+                'importe': float(grp['_importe'].sum()),
             }
 
     cat_dist  = {str(k): int(v) for k, v in df_op['Categoría'].value_counts().items()} \
                 if 'Categoría' in df_op.columns else {}
     tipo_dist = {str(k): int(v) for k, v in df_op['Tipo'].value_counts().items()} \
                 if 'Tipo' in df_op.columns else {}
+
+    # Distribución por empresa acuerdo: empresas con nombre + celda vacía = sin acuerdo
+    acuerdo_dist = {}
+    acuerdo_sin_acuerdo = 0
+    if 'Empresa Acuerdo' in df_op.columns:
+        col = df_op['Empresa Acuerdo'].astype(str).str.strip()
+        mask_vacio = col.isin(['', 'nan', 'NaN', 'None'])
+        acuerdo_sin_acuerdo = int(mask_vacio.sum())
+        acuerdo_dist = {str(k): int(v) for k, v in col[~mask_vacio].value_counts().items()}
 
     return {
         'kpis': {
@@ -256,11 +342,13 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
             'avg_importe':     avg_importe,
             'avg_dur_min':     avg_dur,
         },
-        'shift_table': shift_table,
-        'dur_dist':    dur_dist,
-        'daily_data':  daily_data,
-        'cat_dist':    cat_dist,
-        'tipo_dist':   tipo_dist,
+        'shift_table':  shift_table,
+        'dur_dist':     dur_dist,
+        'daily_data':   daily_data,
+        'cat_dist':     cat_dist,
+        'tipo_dist':    tipo_dist,
+        'acuerdo_dist':         acuerdo_dist,
+        'acuerdo_sin_acuerdo':  acuerdo_sin_acuerdo,
     }
 
 
@@ -334,21 +422,57 @@ def export_excel():
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame([result['kpis']]).to_excel(writer, sheet_name='KPIs', index=False)
+
+        # ── KPIs: formato Métrica / Valor ──────────────────────────────────
+        k = result['kpis']
+        pd.DataFrame([
+            {'Métrica': 'Tickets Operativos',        'Valor': k['total_operativo']},
+            {'Métrica': 'Ingresos Totales',           'Valor': k['total_importe']},
+            {'Métrica': 'Ticket Promedio',            'Valor': k['avg_importe']},
+            {'Métrica': 'Duración Promedio (min)',    'Valor': k['avg_dur_min']},
+            {'Métrica': 'Excluidos (Cancelados o $0)','Valor': k['total_excluidos']},
+        ]).to_excel(writer, sheet_name='KPIs', index=False)
+
+        # ── Turnos: filas = métricas, columnas = turnos ────────────────────
         if result['shift_table']:
-            pd.DataFrame(result['shift_table']).to_excel(writer, sheet_name='Por Turno', index=False)
+            st = result['shift_table']
+            turnos_cols = {r['turno']: r for r in st}
+            col_names   = [r['turno'] for r in st]
+            rows_turnos = [
+                {'': 'Entradas',         **{t: turnos_cols[t]['entradas']    for t in col_names}},
+                {'': 'Salidas',          **{t: turnos_cols[t]['salidas']     for t in col_names}},
+                {'': 'Ingresos',         **{t: turnos_cols[t]['importe']     for t in col_names}},
+                {'': 'Ticket Promedio',  **{t: turnos_cols[t]['avg_importe'] for t in col_names}},
+                {'': 'Duración Promedio',**{t: turnos_cols[t]['avg_dur']     for t in col_names}},
+            ]
+            pd.DataFrame(rows_turnos).to_excel(writer, sheet_name='Turnos', index=False)
+
+        # ── Duración: una fila, rangos como columnas ───────────────────────
         if result['dur_dist']:
-            pd.DataFrame(
-                [{'Duración': k, 'Tickets': v} for k, v in result['dur_dist'].items()]
-            ).to_excel(writer, sheet_name='Por Duración', index=False)
-        if result['daily_data']:
-            pd.DataFrame(
-                [{'Fecha': k, **v} for k, v in sorted(result['daily_data'].items())]
-            ).to_excel(writer, sheet_name='Por Día', index=False)
+            pd.DataFrame([result['dur_dist']]).to_excel(writer, sheet_name='Duración', index=False)
+
+        # ── Categorías ─────────────────────────────────────────────────────
         if result['cat_dist']:
             pd.DataFrame(
                 [{'Categoría': k, 'Tickets': v} for k, v in result['cat_dist'].items()]
             ).to_excel(writer, sheet_name='Categorías', index=False)
+
+        # ── Por Día ────────────────────────────────────────────────────────
+        if result['daily_data']:
+            pd.DataFrame(
+                [{'Fecha': k, 'Tickets': v['tickets'], 'Importe': v['importe']}
+                 for k, v in sorted(result['daily_data'].items())]
+            ).to_excel(writer, sheet_name='Por Día', index=False)
+
+        # ── Acuerdos (solo si hay datos) ───────────────────────────────────
+        if result.get('acuerdo_dist') or result.get('acuerdo_sin_acuerdo'):
+            rows_ac = [{'Empresa Acuerdo': k, 'Tickets': v}
+                       for k, v in result['acuerdo_dist'].items()]
+            rows_ac.append({'Empresa Acuerdo': '(Sin acuerdo / celda vacía)',
+                            'Tickets': result.get('acuerdo_sin_acuerdo', 0)})
+            rows_ac.append({'Empresa Acuerdo': 'TOTAL',
+                            'Tickets': sum(r['Tickets'] for r in rows_ac)})
+            pd.DataFrame(rows_ac).to_excel(writer, sheet_name='Acuerdos', index=False)
 
     output.seek(0)
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
