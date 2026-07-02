@@ -342,7 +342,7 @@ def run_analysis(df: pd.DataFrame, ranges: list, dur_ranges: list) -> dict:
         col = df_op['Empresa Acuerdo'].astype(str).str.strip()
 
         # Agrupar variantes de Showcase en un solo bloque
-        col = col.apply(lambda x: 'SHOWCASE' if x.upper().startswith('SHOWCASE') else x)
+        col = col.apply(lambda x: 'SHOWCASE' if str(x).upper().startswith('SHOWCASE') else str(x))
         df_op = df_op.copy()
         df_op['_empresa_norm'] = col
 
